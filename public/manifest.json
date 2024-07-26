@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "CSV to DBF",
+  "version": "0.1",
+  "description": "Extension for converting CSV files to DBF files",
+  "action": {
+    "default_icon": {
+      "16": "icon_16.png",
+      "48": "icon_48.png",
+      "128": "icon_128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "index.html"
+
+}
