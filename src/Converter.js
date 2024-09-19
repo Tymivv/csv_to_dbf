@@ -12,7 +12,6 @@ const App = () => {
     fileInputRef.current.click();
   };
 
-
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -24,9 +23,9 @@ const App = () => {
 
         const config = Object.keys(result.data[0]).map(key => ({
           name: key,
-          type: 'C', // Default
-          size: 20, // Default
-          decimal: 0 // Default
+          type: 'C', // За замовчуванням
+          size: 20,  // За замовчуванням
+          decimal: 0 // За замовчуванням
         }));
         setFieldsConfig(config);
       };
@@ -37,6 +36,18 @@ const App = () => {
   const handleFieldChange = (index, field, value) => {
     const newFieldsConfig = [...fieldsConfig];
     newFieldsConfig[index][field] = value;
+
+    // Якщо змінено тип поля
+    if (field === 'type') {
+      if (value === 'D') {
+        newFieldsConfig[index]['size'] = 8;
+      } else if (value === 'L') {
+        newFieldsConfig[index]['size'] = 1;
+      } else if (value === 'C') {
+        newFieldsConfig[index]['size'] = 20; // Повернути до стандартного розміру
+      }
+    }
+
     setFieldsConfig(newFieldsConfig);
   };
 
@@ -45,7 +56,7 @@ const App = () => {
     const header = new ArrayBuffer(32 + (fields.length * 32) + 1);
     const view = new DataView(header);
 
-    // dBase III версія
+    // Версія dBase III
     view.setUint8(0, 0x03);
     view.setUint8(1, now.getFullYear() - 1900);
     view.setUint8(2, now.getMonth() + 1);
@@ -84,14 +95,13 @@ const App = () => {
         case 'C':
           value = value.toString().padEnd(field.size, ' ');
           for (let i = 0; i < field.size; i++) {
-            let kod =value.charCodeAt(i);
+            let kod = value.charCodeAt(i);
             if (kod > 500) {
-                kod -= 592;
-            };
-            if (kod === "1030") {
-                console.log("ok");
-                kod = 406;
-            };
+              kod -= 592;
+            }
+            if (kod === 1030) {
+              kod = 406;
+            }
             view.setUint8(offset + i, kod);
           }
           break;
@@ -101,14 +111,17 @@ const App = () => {
             view.setUint8(offset + i, value.charCodeAt(i));
           }
           break;
-          case 'D':   
+        case 'D':
           const date = new Date(value);
-          const formattedDate = date.toISOString().slice(0,10).replace(/-/g, '');
+          const year = date.getFullYear();
+          const month = ('0' + (date.getMonth() + 1)).slice(-2);
+          const day = ('0' + date.getDate()).slice(-2);
+          const formattedDate = year + month + day;
           for (let i = 0; i < 8; i++) {
             view.setUint8(offset + i, formattedDate.charCodeAt(i));
           }
-          break;  
-          case 'L': 
+          break;
+        case 'L':
           value = value.toString().trim().toLowerCase();
           const logicalValue = value === 'true' || value === 't' || value === '1' ? 'T' : 'F';
           view.setUint8(offset, logicalValue.charCodeAt(0));
@@ -171,34 +184,32 @@ const App = () => {
   return (
     <div className={style.card}>
       <h1>Конвертувати CSV в DBF</h1>
-        <input 
-          type="file" 
-          accept=".csv" 
-          onChange={handleFileUpload} 
-          required 
-          className={style.btn} 
-          style={{ display: 'none' }}
-          ref={fileInputRef}
-        />
-        <button 
-          type="button"
-          className={style.btn} 
-          onClick={openFileInput}>
-          вибрати CSV
-        </button>
+      <input
+        type="file"
+        accept=".csv"
+        onChange={handleFileUpload}
+        required
+        className={style.btn}
+        style={{ display: 'none' }}
+        ref={fileInputRef}
+      />
+      <button
+        type="button"
+        className={style.btn}
+        onClick={openFileInput}>
+        вибрати CSV
+      </button>
 
       {fieldsConfig.length > 0 && (
         <div id="fieldOptions" className={style.list}>
-          <h2 className={style.list_title} >Налаштування полів</h2>
+          <h2 className={style.list_title}>Налаштування полів</h2>
 
           {fieldsConfig.map((field, index) => (
             <div className={style.item} key={index}>
-              
-              
-                <div className={style.label}>{field.name}:</div>
-                <div className={style.select_grup}>
+              <div className={style.label}>{field.name}:</div>
+              <div className={style.select_grup}>
                 <select
-                  className={style.type} 
+                  className={style.type}
                   value={field.type}
                   onChange={(e) => handleFieldChange(index, 'type', e.target.value)}
                 >
@@ -213,10 +224,11 @@ const App = () => {
                   value={field.size}
                   onChange={(e) => handleFieldChange(index, 'size', e.target.value)}
                   placeholder={
-                    field.type === 'D' ? "8" : 
-                    field.type === 'L' ? "1" : 
-                  "Розмір"
+                    field.type === 'D' ? '8' :
+                    field.type === 'L' ? '1' :
+                    'Розмір'
                   }
+                  readOnly={field.type === 'D' || field.type === 'L'} // Зробити поле тільки для читання
                 />
                 {field.type === 'N' && (
                   <input
@@ -224,25 +236,23 @@ const App = () => {
                     type="number"
                     value={field.decimal}
                     onChange={(e) => handleFieldChange(index, 'decimal', e.target.value)}
-                    placeholder="Decimal Places"
+                    placeholder="Кількість знаків після коми"
                   />
                 )}
-                </div>
-              
+              </div>
             </div>
           ))}
         </div>
       )}
-      <button 
-        className={style.btn} 
-        onClick={convertToDBF} 
+      <button
+        className={style.btn}
+        onClick={convertToDBF}
         disabled={!csvData}
-        >
+      >
         Конвертувати у DBF
       </button>
     </div>
   );
-  
 };
 
 export default App;
