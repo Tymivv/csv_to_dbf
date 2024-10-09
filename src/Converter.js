@@ -1,11 +1,17 @@
 import React, { useState, useRef } from 'react';
 import { saveAs } from 'file-saver';
 import { parse } from 'papaparse';
+import iconv from 'iconv-lite';
 import style from './app.module.css';
+import { Buffer } from 'buffer';
+window.Buffer = window.Buffer || require("buffer").Buffer;
+
+
 
 const App = () => {
   const [csvData, setCsvData] = useState(null);
   const [fieldsConfig, setFieldsConfig] = useState([]);
+  const [encoding, setEncoding] = useState('win-1251');
   const fileInputRef = useRef(null);
 
   const openFileInput = () => {
@@ -21,11 +27,11 @@ const App = () => {
         const result = parse(text, { header: true });
         setCsvData(result.data);
 
-        const config = Object.keys(result.data[0]).map(key => ({
+        const config = Object.keys(result.data[0]).map((key) => ({
           name: key,
-          type: 'C', // За замовчуванням
-          size: 20,  // За замовчуванням
-          decimal: 0 // За замовчуванням
+          type: 'C',
+          size: 20,
+          decimal: 0,
         }));
         setFieldsConfig(config);
       };
@@ -37,14 +43,13 @@ const App = () => {
     const newFieldsConfig = [...fieldsConfig];
     newFieldsConfig[index][field] = value;
 
-    // Якщо змінено тип поля
     if (field === 'type') {
       if (value === 'D') {
         newFieldsConfig[index]['size'] = 8;
       } else if (value === 'L') {
         newFieldsConfig[index]['size'] = 1;
       } else if (value === 'C') {
-        newFieldsConfig[index]['size'] = 20; // Повернути до стандартного розміру
+        newFieldsConfig[index]['size'] = 20;
       }
     }
 
@@ -53,62 +58,64 @@ const App = () => {
 
   const createDbfHeader = (fields, numRecords) => {
     const now = new Date();
-    const header = new ArrayBuffer(32 + (fields.length * 32) + 1);
+    const header = new ArrayBuffer(32 + fields.length * 32 + 1);
     const view = new DataView(header);
 
-    // Версія dBase III
     view.setUint8(0, 0x03);
     view.setUint8(1, now.getFullYear() - 1900);
     view.setUint8(2, now.getMonth() + 1);
     view.setUint8(3, now.getDate());
     view.setUint32(4, numRecords, true);
-    view.setUint16(8, 32 + (fields.length * 32) + 1, true);
-    view.setUint16(10, fields.reduce((sum, field) => sum + field.size, 1), true);
+    view.setUint16(8, 32 + fields.length * 32 + 1, true);
+    view.setUint16(
+      10,
+      fields.reduce((sum, field) => sum + field.size, 1),
+      true
+    );
 
     fields.forEach((field, index) => {
       const name = field.name.substring(0, 10).padEnd(10, '\0');
+      const encodedName = iconv.encode(name, encoding); // iconv без Buffer
       for (let i = 0; i < 10; i++) {
-        view.setUint8(32 + (index * 32) + i, name.charCodeAt(i));
+        view.setUint8(32 + index * 32 + i, encodedName[i] || 0);
       }
-      view.setUint8(32 + (index * 32) + 11, field.type.charCodeAt(0));
-      view.setUint8(32 + (index * 32) + 16, field.size);
+      view.setUint8(32 + index * 32 + 11, field.type.charCodeAt(0));
+      view.setUint8(32 + index * 32 + 16, field.size);
       if (field.type === 'N') {
-        view.setUint8(32 + (index * 32) + 17, field.decimal);
+        view.setUint8(32 + index * 32 + 17, field.decimal);
       }
     });
 
-    view.setUint8(32 + (fields.length * 32), 0x0D);
+    view.setUint8(32 + fields.length * 32, 0x0d);
 
     return header;
   };
 
   const createDbfRecord = (fields, record) => {
-    const recordBuffer = new ArrayBuffer(fields.reduce((sum, field) => sum + field.size, 1));
+    const recordBuffer = new ArrayBuffer(
+      fields.reduce((sum, field) => sum + field.size, 1)
+    );
     const view = new DataView(recordBuffer);
 
     view.setUint8(0, 0x20);
 
     let offset = 1;
-    fields.forEach(field => {
+    fields.forEach((field) => {
       let value = record[field.name] || '';
       switch (field.type) {
         case 'C':
           value = value.toString().padEnd(field.size, ' ');
+          const encodedValue = iconv.encode(value, encoding); // iconv без Buffer
           for (let i = 0; i < field.size; i++) {
-            let kod = value.charCodeAt(i);
-            if (kod > 500) {
-              kod -= 592;
-            }
-            if (kod === 1030) {
-              kod = 406;
-            }
-            view.setUint8(offset + i, kod);
+            view.setUint8(offset + i, encodedValue[i] || 0x20);
           }
           break;
         case 'N':
-          value = parseFloat(value).toFixed(field.decimal).padStart(field.size, ' ');
+          value = parseFloat(value)
+            .toFixed(field.decimal)
+            .padStart(field.size, ' ');
           for (let i = 0; i < field.size; i++) {
-            view.setUint8(offset + i, value.charCodeAt(i));
+            view.setUint8(offset + i, value.charCodeAt(i) || 0x20);
           }
           break;
         case 'D':
@@ -118,12 +125,13 @@ const App = () => {
           const day = ('0' + date.getDate()).slice(-2);
           const formattedDate = year + month + day;
           for (let i = 0; i < 8; i++) {
-            view.setUint8(offset + i, formattedDate.charCodeAt(i));
+            view.setUint8(offset + i, formattedDate.charCodeAt(i) || 0x30);
           }
           break;
         case 'L':
-          value = value.toString().trim().toLowerCase();
-          const logicalValue = value === 'true' || value === 't' || value === '1' ? 'T' : 'F';
+          value = value.toString().trim().toUpperCase();
+          const logicalValue =
+            value === 'TRUE' || value === 'T' || value === '1' ? 'T' : 'F';
           view.setUint8(offset, logicalValue.charCodeAt(0));
           break;
         default:
@@ -138,7 +146,7 @@ const App = () => {
   const convertToDBF = () => {
     if (csvData) {
       try {
-        fieldsConfig.forEach(field => {
+        fieldsConfig.forEach((field) => {
           field.size = parseInt(field.size, 10);
           if (field.type === 'N') {
             field.decimal = parseInt(field.decimal, 10);
@@ -149,10 +157,12 @@ const App = () => {
         });
 
         const header = createDbfHeader(fieldsConfig, csvData.length);
-        const records = csvData.map(row => createDbfRecord(fieldsConfig, row));
+        const records = csvData.map((row) =>
+          createDbfRecord(fieldsConfig, row)
+        );
 
         let totalLength = header.byteLength;
-        records.forEach(record => {
+        records.forEach((record) => {
           totalLength += record.byteLength;
         });
 
@@ -163,17 +173,23 @@ const App = () => {
         new Uint8Array(dbfBuffer).set(new Uint8Array(header), offset);
         offset += header.byteLength;
 
-        records.forEach(record => {
+        records.forEach((record) => {
           new Uint8Array(dbfBuffer).set(new Uint8Array(record), offset);
           offset += record.byteLength;
         });
 
-        view.setUint8(totalLength, 0x1A);
+        view.setUint8(totalLength, 0x1a);
 
-        // Windows-1251
-        view.setUint8(29, 0xC9);
+        // Встановлення кодування
+        if (encoding === 'win-1251') {
+          view.setUint8(29, 0xc9);
+        } else if (encoding === 'cp866') {
+          view.setUint8(29, 0x65);
+        }
 
-        const blob = new Blob([dbfBuffer], { type: 'application/octet-stream' });
+        const blob = new Blob([dbfBuffer], {
+          type: 'application/octet-stream',
+        });
         saveAs(blob, 'output.dbf');
       } catch (error) {
         console.error('Помилка під час конвертування в DBF:', error);
@@ -193,10 +209,7 @@ const App = () => {
         style={{ display: 'none' }}
         ref={fileInputRef}
       />
-      <button
-        type="button"
-        className={style.btn}
-        onClick={openFileInput}>
+      <button type="button" className={style.btn} onClick={openFileInput}>
         вибрати CSV
       </button>
 
@@ -211,7 +224,9 @@ const App = () => {
                 <select
                   className={style.type}
                   value={field.type}
-                  onChange={(e) => handleFieldChange(index, 'type', e.target.value)}
+                  onChange={(e) =>
+                    handleFieldChange(index, 'type', e.target.value)
+                  }
                 >
                   <option value="C">Character</option>
                   <option value="N">Number</option>
@@ -222,33 +237,48 @@ const App = () => {
                   className={style.size}
                   type="number"
                   value={field.size}
-                  onChange={(e) => handleFieldChange(index, 'size', e.target.value)}
-                  placeholder={
-                    field.type === 'D' ? '8' :
-                    field.type === 'L' ? '1' :
-                    'Розмір'
+                  onChange={(e) =>
+                    handleFieldChange(index, 'size', e.target.value)
                   }
-                  readOnly={field.type === 'D' || field.type === 'L'} // Зробити поле тільки для читання
+                  placeholder={
+                    field.type === 'D'
+                      ? '8'
+                      : field.type === 'L'
+                      ? '1'
+                      : 'Розмір'
+                  }
+                  readOnly={field.type === 'D' || field.type === 'L'}
                 />
                 {field.type === 'N' && (
                   <input
                     className={style.size}
                     type="number"
                     value={field.decimal}
-                    onChange={(e) => handleFieldChange(index, 'decimal', e.target.value)}
+                    onChange={(e) =>
+                      handleFieldChange(index, 'decimal', e.target.value)
+                    }
                     placeholder="Кількість знаків після коми"
                   />
                 )}
               </div>
             </div>
           ))}
+
+          <div className={style.encoding}>
+            <label htmlFor="encoding">Кодування DBF файла:</label>
+            <select
+              className={style.type}
+              id="encoding"
+              value={encoding}
+              onChange={(e) => setEncoding(e.target.value)}
+            >
+              <option value="win-1251">Windows-1251</option>
+              <option value="cp866">CP866</option>
+            </select>
+          </div>
         </div>
       )}
-      <button
-        className={style.btn}
-        onClick={convertToDBF}
-        disabled={!csvData}
-      >
+      <button className={style.btn} onClick={convertToDBF} disabled={!csvData}>
         Конвертувати у DBF
       </button>
     </div>
