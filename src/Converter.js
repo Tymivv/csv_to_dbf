@@ -93,8 +93,12 @@ const App = () => {
   };
 
   const isDate = (value) => {
-    const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
-    return dateRegex.test(value);
+    // Перевіряємо кілька форматів дат
+    const dateFormats = [
+      /^\d{2}\.\d{2}\.\d{4}$/, // DD.MM.YYYY
+      /^\d{1,2}\/\d{1,2}\/\d{2,4}$/ // M/D/YY or MM/DD/YYYY
+    ];
+    return dateFormats.some((regex) => regex.test(value));
   };
 
   const isNumeric = (value) => {
@@ -110,7 +114,7 @@ const App = () => {
     }
     const decimalDigits = (normalizedValue.split('.')[1] || '').length;
     const formattedValue = numValue.toFixed(decimalDigits);
-    const size = formattedValue.length;
+    const size = formattedValue.replace('.', '').length + (decimalDigits > 0 ? 1 : 0);
     return { size: size > 20 ? 20 : size, decimal: decimalDigits };
   };
 
@@ -194,16 +198,9 @@ const App = () => {
           }
           break;
         case 'D':
-          const dateParts = value.split('.');
-          if (dateParts.length === 3) {
-            const formattedDate = `${dateParts[2]}${dateParts[1]}${dateParts[0]}`;
-            for (let i = 0; i < 8; i++) {
-              view.setUint8(offset + i, formattedDate.charCodeAt(i) || 0x30);
-            }
-          } else {
-            for (let i = 0; i < 8; i++) {
-              view.setUint8(offset + i, 0x30);
-            }
+          const formattedDate = formatDateForDbf(value);
+          for (let i = 0; i < 8; i++) {
+            view.setUint8(offset + i, formattedDate.charCodeAt(i) || 0x30);
           }
           break;
         case 'L':
@@ -219,6 +216,36 @@ const App = () => {
     });
 
     return recordBuffer;
+  };
+
+  const formatDateForDbf = (value) => {
+    let dateObj;
+
+    // Спробуємо розпізнати дату в різних форматах
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(value)) {
+      // Формат DD.MM.YYYY
+      const [day, month, year] = value.split('.');
+      dateObj = new Date(`${year}-${month}-${day}`);
+    } else if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(value)) {
+      // Формат M/D/YY або MM/DD/YYYY
+      const [month, day, year] = value.split('/');
+      const fullYear = year.length === 2 ? `20${year}` : year;
+      dateObj = new Date(`${fullYear}-${month}-${day}`);
+    } else {
+      // Некоректний формат дати
+      return '00000000';
+    }
+
+    if (isNaN(dateObj.getTime())) {
+      // Якщо дата некоректна
+      return '00000000';
+    }
+
+    const year = dateObj.getFullYear().toString();
+    const month = ('0' + (dateObj.getMonth() + 1)).slice(-2);
+    const day = ('0' + dateObj.getDate()).slice(-2);
+
+    return `${year}${month}${day}`;
   };
 
   const convertToDBF = () => {
