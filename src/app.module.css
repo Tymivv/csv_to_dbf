@@ -132,7 +132,7 @@ select {
     background-size:
       5px 5px,
       5px 5px,
-      1.5em 1.5em;
+      2.4em 1.5em;
     background-repeat: no-repeat;
   }
   
@@ -148,7 +148,7 @@ select {
     background-size:
       5px 5px,
       5px 5px,
-      1.5em 1.5em;
+      2.4em 1.5em;
     background-repeat: no-repeat;
     border-color: green;
     outline: 0;
@@ -159,4 +159,7 @@ select {
 }
 .select_grup{
   display: flex;
+}
+.autoDetect{
+  margin: 10px;
 }

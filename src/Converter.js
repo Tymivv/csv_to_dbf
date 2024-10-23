@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react'; 
 import { saveAs } from 'file-saver';
 import { parse } from 'papaparse';
 import iconv from 'iconv-lite';
@@ -6,12 +6,11 @@ import style from './app.module.css';
 import { Buffer } from 'buffer';
 window.Buffer = window.Buffer || require("buffer").Buffer;
 
-
-
 const App = () => {
   const [csvData, setCsvData] = useState(null);
   const [fieldsConfig, setFieldsConfig] = useState([]);
   const [encoding, setEncoding] = useState('win-1251');
+  const [autoDetectTypes, setAutoDetectTypes] = useState(false);
   const fileInputRef = useRef(null);
 
   const openFileInput = () => {
@@ -27,16 +26,92 @@ const App = () => {
         const result = parse(text, { header: true });
         setCsvData(result.data);
 
-        const config = Object.keys(result.data[0]).map((key) => ({
-          name: key,
-          type: 'C',
-          size: 20,
-          decimal: 0,
-        }));
+        const config = Object.keys(result.data[0]).map((key) => {
+          const value = result.data[0][key];
+          let fieldConfig;
+          if (autoDetectTypes) {
+            const { type, size, decimal } = determineFieldTypeAndSize(value);
+            fieldConfig = {
+              name: key,
+              type,
+              size,
+              decimal,
+            };
+          } else {
+            fieldConfig = {
+              name: key,
+              type: 'C',
+              size: 20,
+              decimal: 0,
+            };
+          }
+          return fieldConfig;
+        });
         setFieldsConfig(config);
       };
       reader.readAsText(file, 'UTF-8');
     }
+  };
+
+  useEffect(() => {
+    if (csvData && csvData.length > 0) {
+      const config = Object.keys(csvData[0]).map((key) => {
+        const value = csvData[0][key];
+        let fieldConfig;
+        if (autoDetectTypes) {
+          const { type, size, decimal } = determineFieldTypeAndSize(value);
+          fieldConfig = {
+            name: key,
+            type,
+            size,
+            decimal,
+          };
+        } else {
+          fieldConfig = {
+            name: key,
+            type: 'C',
+            size: 20,
+            decimal: 0,
+          };
+        }
+        return fieldConfig;
+      });
+      setFieldsConfig(config);
+    }
+  }, [autoDetectTypes, csvData]);
+
+  const determineFieldTypeAndSize = (value) => {
+    if (isDate(value)) {
+      return { type: 'D', size: 8, decimal: 0 };
+    } else if (isNumeric(value)) {
+      const { size, decimal } = getNumberSizeAndDecimal(value);
+      return { type: 'N', size, decimal };
+    } else {
+      const length = value.toString().length;
+      return { type: 'C', size: length > 254 ? 254 : length, decimal: 0 };
+    }
+  };
+
+  const isDate = (value) => {
+    const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
+    return dateRegex.test(value);
+  };
+
+  const isNumeric = (value) => {
+    const normalizedValue = value.toString().replace(',', '.');
+    return !isNaN(parseFloat(normalizedValue)) && isFinite(normalizedValue);
+  };
+
+  const getNumberSizeAndDecimal = (value) => {
+    const normalizedValue = value.toString().replace(',', '.');
+    const numValue = parseFloat(normalizedValue);
+    if (isNaN(numValue)) {
+      return { size: 10, decimal: 0 };
+    }
+    const decimalDigits = (normalizedValue.split('.')[1] || '').length;
+    const formattedValue = numValue.toFixed(decimalDigits);
+    const size = formattedValue.length;
+    return { size: size > 20 ? 20 : size, decimal: decimalDigits };
   };
 
   const handleFieldChange = (index, field, value) => {
@@ -75,7 +150,7 @@ const App = () => {
 
     fields.forEach((field, index) => {
       const name = field.name.substring(0, 10).padEnd(10, '\0');
-      const encodedName = iconv.encode(name, encoding); // iconv без Buffer
+      const encodedName = iconv.encode(name, encoding);
       for (let i = 0; i < 10; i++) {
         view.setUint8(32 + index * 32 + i, encodedName[i] || 0);
       }
@@ -105,13 +180,13 @@ const App = () => {
       switch (field.type) {
         case 'C':
           value = value.toString().padEnd(field.size, ' ');
-          const encodedValue = iconv.encode(value, encoding); // iconv без Buffer
+          const encodedValue = iconv.encode(value, encoding);
           for (let i = 0; i < field.size; i++) {
             view.setUint8(offset + i, encodedValue[i] || 0x20);
           }
           break;
         case 'N':
-          value = parseFloat(value)
+          value = parseFloat(value.toString().replace(',', '.'))
             .toFixed(field.decimal)
             .padStart(field.size, ' ');
           for (let i = 0; i < field.size; i++) {
@@ -119,13 +194,16 @@ const App = () => {
           }
           break;
         case 'D':
-          const date = new Date(value);
-          const year = date.getFullYear();
-          const month = ('0' + (date.getMonth() + 1)).slice(-2);
-          const day = ('0' + date.getDate()).slice(-2);
-          const formattedDate = year + month + day;
-          for (let i = 0; i < 8; i++) {
-            view.setUint8(offset + i, formattedDate.charCodeAt(i) || 0x30);
+          const dateParts = value.split('.');
+          if (dateParts.length === 3) {
+            const formattedDate = `${dateParts[2]}${dateParts[1]}${dateParts[0]}`;
+            for (let i = 0; i < 8; i++) {
+              view.setUint8(offset + i, formattedDate.charCodeAt(i) || 0x30);
+            }
+          } else {
+            for (let i = 0; i < 8; i++) {
+              view.setUint8(offset + i, 0x30);
+            }
           }
           break;
         case 'L':
@@ -216,6 +294,16 @@ const App = () => {
       {fieldsConfig.length > 0 && (
         <div id="fieldOptions" className={style.list}>
           <h2 className={style.list_title}>Налаштування полів</h2>
+          <div className={style.autoDetect}>
+            <label>
+              <input
+                type="checkbox"
+                checked={autoDetectTypes}
+                onChange={(e) => setAutoDetectTypes(e.target.checked)}
+              />
+              Автоматично визначити типи полів
+            </label>
+          </div>
 
           {fieldsConfig.map((field, index) => (
             <div className={style.item} key={index}>
